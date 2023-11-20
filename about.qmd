@@ -1,0 +1,20 @@
+---
+title: "About"
+image: naama.jpeg
+about:
+  template: jolla
+  links:
+    - icon: linkedin
+      text: LinkedIn
+      href: https://linkedin.com/juhapaal
+    - icon: github
+      text: Github
+      href: https://github.com/kurantti
+    - icon: vsco
+      text: vsco
+      href: https://vsco.co/kurantti/gallery
+---
+
+About this blog
+
+moikka sinne!

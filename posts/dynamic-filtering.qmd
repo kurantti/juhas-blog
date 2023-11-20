@@ -1,0 +1,17 @@
+---
+title: "dynamic filtering"
+author: "Juha"
+---
+
+Data analytics work requires to use SQL, where the work can be for example comparing different table, for example feature engineering. Alrough SQL is easy to pickup and efficient tool.
+
+```{r}
+library(tidyverse)
+```
+
+In this post how to build iterative sql based on purrr and list. I also show how to use dbplyr to query databases with custom made function.
+
+```{r}
+cars |> 
+    as_tibble()
+```
