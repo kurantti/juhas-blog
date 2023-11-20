@@ -1,0 +1,4 @@
+- source: project
+  netlify:
+    - id: 8ed26d0b-dd7e-457a-9aff-31061fbb0605
+      url: 'https://capable-treacle-1d5cb2.netlify.app'

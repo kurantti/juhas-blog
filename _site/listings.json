@@ -1,12 +1,12 @@
 [
   {
-    "listing": "/index.html",
+    "listing": "/projects.html",
     "items": [
       "/posts/dynamic-filtering.html"
     ]
   },
   {
-    "listing": "/projects.html",
+    "listing": "/index.html",
     "items": [
       "/posts/dynamic-filtering.html"
     ]
