@@ -1,0 +1,119 @@
+---
+title: "Refugees in x"
+description: ""
+author: "Juha Päällysaho"
+date: "2023-11-13"
+date-modified: "2023-11-20"
+execute:
+  echo: true
+  warning: false
+draft: true
+---
+
+
+
+```{r}
+# Option 1: tidytuesdayR package 
+## install.packages("tidytuesdayR")
+library(tidyverse)
+library(gt)
+```
+
+
+```{r}
+#| output: false 
+
+tuesdata <- tidytuesdayR::tt_load('2023-08-22')
+data_raw <- tuesdata |> pluck(1)
+```
+
+```{r}
+df <- data_raw |> 
+  mutate(year = as_date(parse_date_time(year, "%Y")), .before = 1) |> 
+    rename(
+        origin_country = coo_name,
+        destination_country = coa_name
+    )
+
+df
+```
+
+```{r}
+library(skimr)
+df |> skim()
+```
+
+
+# High level
+
+## Time elements
+
+
+### refugees
+
+* time element of refugees, asymlum seekeers, internally displaced persons (idps) and returned (refugees and idps)
+ * these don't have missing data
+ 
+
+
+```{r}
+refugees_long <- df |> 
+    group_by(year) |> 
+    summarise(across(where(is.double), \(x) sum(x))) |> 
+    pivot_longer(refugees:hst)
+
+```
+
+```{r}
+scale_y_mil <- function() {
+    scale_y_continuous(labels = scales::label_number(scale = 1/1000000 ,big.mark = " ", suffix = "M"))
+}
+```
+
+
+```{r}
+refugees_long |> 
+    ggplot(aes(year, value, color = name)) +
+    geom_point() +
+    geom_smooth(method = lm) +
+    scale_y_number() +
+    labs(title = "how refugees change over time?", subtitle = "linear trend")
+```
+
+```{r}
+refugees_long |> 
+    # filter(!name %in% c("idps", "oip", "ooc") ) |>  
+    ggplot(aes(year, value, fill = name)) +
+    scale_y_mil() +
+    labs(title = "how refugees change over time?",
+         subtitle = "per year")
+```
+
+```{r}
+refugees_long |> 
+    filter(str_starts(name, "returned") ) |>
+    ggplot(aes(year, value, fill = name)) +
+    geom_col() +
+    scale_y_continuous(labels = scales::label_number(big.mark = "", decimal.mark = " "))+
+    labs(title = "how refugees change over time?",
+         subtitle = "per year")
+```
+
+
+
+### to what countries
+
+```{r}
+
+```
+
+
+# other focus ideas
+
+* what countries too the most (ratio of gdp)
+* from where (coo_name) to destination (coa_name)
+* has it changed? why it has changed?
+
+* too many countries, what to focus
+  + changes in some region? - why a change has happended?
+* short deep dive to asylum seekers?
