@@ -28,39 +28,61 @@ data_raw <- tuesdata |> pluck(1)
 ```
 
 ```{r}
+countries <- read_csv("https://gist.githubusercontent.com/fogonwater/bc2b98baeb2aa16b5e6fbc1cf3d7d545/raw/6fd2951260d8f171181a45d2f09ee8b2c7767330/countries.csv") # get continents data
+
+countries_less <-countries |>  select(country_code3, continent_name)
+
+```
+
+
+```{r}
 df <- data_raw |> 
   mutate(year = as_date(parse_date_time(year, "%Y")), .before = 1) |> 
     rename(
         origin_country = coo_name,
         destination_country = coa_name
-    )
+    ) |> 
+    left_join(countries_less, by = join_by("coo_iso" == "country_code3")) |> 
+    left_join(countries_less, by = join_by("coa_iso" == "country_code3")) |> 
+    rename(origin_continent = continent_name.x,
+           destination_continent = continent_name.y)
 
 df
 ```
 
 ```{r}
-library(skimr)
-df |> skim()
+
+df_skim <- df |> skimr::skim()
+df_skim
 ```
 
 
-# High level
 
-## Time elements
+# main
+
+origin and destinations countries which general direction of refugees movement.
+refugees group are split to different sub classes, like asylum seekers, internally displaced persons and stateless person 
+refugee and internally displaced person also have returned level
+
+# focus
+
+check which refugees group gives interesting analysis layer
 
 
-### refugees
-
-* time element of refugees, asymlum seekeers, internally displaced persons (idps) and returned (refugees and idps)
- * these don't have missing data
- 
-
+# split
 
 ```{r}
-refugees_long <- df |> 
-    group_by(year) |> 
+group_to_long <- function(.data, ...) {
+    .data |> 
+    group_by(year, ...) |> 
     summarise(across(where(is.double), \(x) sum(x))) |> 
     pivot_longer(refugees:hst)
+}
+
+refugees_long <- group_to_long(df)
+refugees_long_origin <- group_to_long(df, origin_continent)
+
+refugees_long_destination <- group_to_long(df, destination_continent)
 
 ```
 
@@ -70,31 +92,62 @@ scale_y_mil <- function() {
 }
 ```
 
+```{r}
+library(colorspace)
+qualitative_hcl(6)
+```
+
 
 ```{r}
 refugees_long |> 
+    ggplot(aes(year, value, fill = name)) +
+    geom_col()+
+    scale_y_mil() +
+    labs(title = "total",
+         subtitle = "per year") +
+    scale_fill_discrete_qualitative()
+```
+```{r}
+plot_continents <- function(.data, facet_var = origin_continent) {
+    .data |> 
+    ggplot(aes(year, value, fill = name)) +
+    geom_col()+
+    scale_y_mil() +
+    labs(title = "total, origin continent",
+         subtitle = "per year") +
+    scale_fill_discrete_qualitative() +
+    facet_grid(cols = vars({{facet_var}} ))
+}
+
+plot_continents(refugees_long_origin)
+
+```
+
+```{r}
+
+plot_continents(refugees_long_destination, destination_continent)
+
+```
+
+
+```{r}
+refugees_long |> 
+    filter(name %in% c("refugees", "idps", "returned_idps", "returned_refugees")) |> 
     ggplot(aes(year, value, color = name)) +
     geom_point() +
     geom_smooth(method = lm) +
     scale_y_number() +
-    labs(title = "how refugees change over time?", subtitle = "linear trend")
+    labs(title = "how refugees/idps change over time?", subtitle = "linear trend")
 ```
 
-```{r}
-refugees_long |> 
-    # filter(!name %in% c("idps", "oip", "ooc") ) |>  
-    ggplot(aes(year, value, fill = name)) +
-    scale_y_mil() +
-    labs(title = "how refugees change over time?",
-         subtitle = "per year")
-```
+
 
 ```{r}
 refugees_long |> 
     filter(str_starts(name, "returned") ) |>
     ggplot(aes(year, value, fill = name)) +
     geom_col() +
-    scale_y_continuous(labels = scales::label_number(big.mark = "", decimal.mark = " "))+
+    scale_y_mil()
     labs(title = "how refugees change over time?",
          subtitle = "per year")
 ```
@@ -105,6 +158,14 @@ refugees_long |>
 
 ```{r}
 
+countries <- read_csv("https://gist.githubusercontent.com/fogonwater/bc2b98baeb2aa16b5e6fbc1cf3d7d545/raw/6fd2951260d8f171181a45d2f09ee8b2c7767330/countries.csv") 
+
+countries_less <-countries |>  select(country_code3, continent_name)
+
+df2 <- df |> 
+    
+  df2 |>   
+    glimpse()
 ```
 
 
