@@ -1,180 +1,217 @@
 ---
-title: "Refugees in x"
-description: ""
+title: "Refugees Analysis"
+description: "Tidytuesday 2023-08-22"
 author: "Juha Päällysaho"
 date: "2023-11-13"
-date-modified: "2023-11-20"
+date-modified: "2023-11-23"
 execute:
   echo: true
   warning: false
-draft: true
+draft: false
 ---
 
-
+# data prep
 
 ```{r}
-# Option 1: tidytuesdayR package 
+# Option 1: tidytuesdayR package
 ## install.packages("tidytuesdayR")
 library(tidyverse)
-library(gt)
 ```
 
+## read data
 
 ```{r}
-#| output: false 
+#| output: false
 
-tuesdata <- tidytuesdayR::tt_load('2023-08-22')
+tuesdata <- tidytuesdayR::tt_load("2023-08-22")
 data_raw <- tuesdata |> pluck(1)
 ```
 
+## skim the data
+
+check data range
+missing data from origin_continent
+oip and hst are completely missing, ill remove them from dateset
+date values are from 2010 to 2022
+
+
 ```{r}
-countries <- read_csv("https://gist.githubusercontent.com/fogonwater/bc2b98baeb2aa16b5e6fbc1cf3d7d545/raw/6fd2951260d8f171181a45d2f09ee8b2c7767330/countries.csv") # get continents data
-
-countries_less <-countries |>  select(country_code3, continent_name)
-
+skimr::skim(data_raw)
 ```
 
 
-```{r}
-df <- data_raw |> 
-  mutate(year = as_date(parse_date_time(year, "%Y")), .before = 1) |> 
-    rename(
-        origin_country = coo_name,
-        destination_country = coa_name
-    ) |> 
-    left_join(countries_less, by = join_by("coo_iso" == "country_code3")) |> 
-    left_join(countries_less, by = join_by("coa_iso" == "country_code3")) |> 
-    rename(origin_continent = continent_name.x,
-           destination_continent = continent_name.y)
-
-df
-```
+##  continents data
 
 ```{r}
+countries <- read_csv("https://gist.githubusercontent.com/fogonwater/bc2b98baeb2aa16b5e6fbc1cf3d7d545/raw/6fd2951260d8f171181a45d2f09ee8b2c7767330/countries.csv")
 
-df_skim <- df |> skimr::skim()
-df_skim
+countries_less <- countries |> select(country_code3, continent_name)
 ```
 
+## enrich 
 
 
-# main
+```{r}
+df <- data_raw |>
+  select(!c(oip, hst)) |>
+  mutate(year = as_date(parse_date_time(year, "%Y")), .before = 1) |>
+  rename(
+    origin_country = coo_name,
+    destination_country = coa_name,
+    others_of_concern = ooc
+  ) |>
+  left_join(countries_less, by = join_by("coo_iso" == "country_code3")) |>
+  left_join(countries_less, by = join_by("coa_iso" == "country_code3")) |>
+  rename(
+    origin_continent = continent_name.x,
+    destination_continent = continent_name.y
+  )
 
-origin and destinations countries which general direction of refugees movement.
-refugees group are split to different sub classes, like asylum seekers, internally displaced persons and stateless person 
-refugee and internally displaced person also have returned level
+df |> glimpse()
+```
 
-# focus
-
-check which refugees group gives interesting analysis layer
-
-
-# split
+## data to long format
 
 ```{r}
 group_to_long <- function(.data, ...) {
-    .data |> 
-    group_by(year, ...) |> 
-    summarise(across(where(is.double), \(x) sum(x))) |> 
-    pivot_longer(refugees:hst)
+  .data |>
+    group_by(year, ...) |>
+    summarise(across(where(is.double), \(x) sum(x))) |>
+    pivot_longer(refugees:others_of_concern)
 }
 
 refugees_long <- group_to_long(df)
 refugees_long_origin <- group_to_long(df, origin_continent)
 
 refugees_long_destination <- group_to_long(df, destination_continent)
-
 ```
 
-```{r}
-scale_y_mil <- function() {
-    scale_y_continuous(labels = scales::label_number(scale = 1/1000000 ,big.mark = " ", suffix = "M"))
-}
-```
-
+## get colorspace 
 ```{r}
 library(colorspace)
 qualitative_hcl(6)
 ```
 
+# high level analysis
+
+## notes 
+
+origin and destinations countries which general direction of refugees movement.
+refugees group are split to different sub classes, like asylum seekers, internally displaced persons and stateless person 
+refugee and internally displaced person also have returned level
+
+## focus
+
+check which refugees group gives interesting analysis layer
+
+
+
+
+
+## global level
 
 ```{r}
-refugees_long |> 
-    ggplot(aes(year, value, fill = name)) +
-    geom_col()+
-    scale_y_mil() +
-    labs(title = "total",
-         subtitle = "per year") +
-    scale_fill_discrete_qualitative()
-```
-```{r}
-plot_continents <- function(.data, facet_var = origin_continent) {
-    .data |> 
-    ggplot(aes(year, value, fill = name)) +
-    geom_col()+
-    scale_y_mil() +
-    labs(title = "total, origin continent",
-         subtitle = "per year") +
-    scale_fill_discrete_qualitative() +
-    facet_grid(cols = vars({{facet_var}} ))
+scale_y_mil <- function() {
+  scale_y_continuous(labels = scales::label_number(scale = 1 / 1000000, big.mark = " ", suffix = "M"))
 }
 
-plot_continents(refugees_long_origin)
+scale_x_yrs <- function() {
+  scale_x_date(date_labels = "%y", date_breaks = "4 years")
+}
 
+
+refugees_long |>
+  ggplot(aes(year, value, fill = name)) +
+  geom_col() +
+  scale_y_mil() +
+  scale_x_yrs() +
+  labs(
+    title = "has there been a change in refugees on global level?",
+    subtitle = "2010 - 2023"
+  ) +
+  scale_fill_discrete_qualitative()
 ```
+## continent level
 
 ```{r}
-
-plot_continents(refugees_long_destination, destination_continent)
-
-```
-
-
-```{r}
-refugees_long |> 
-    filter(name %in% c("refugees", "idps", "returned_idps", "returned_refugees")) |> 
-    ggplot(aes(year, value, color = name)) +
-    geom_point() +
-    geom_smooth(method = lm) +
-    scale_y_number() +
-    labs(title = "how refugees/idps change over time?", subtitle = "linear trend")
-```
-
-
-
-```{r}
-refugees_long |> 
-    filter(str_starts(name, "returned") ) |>
-    ggplot(aes(year, value, fill = name)) +
+plot_continents <- function(.data, .title = "value", .subtitle = "value2", facet_var = origin_continent, .name = name) {
+  .data |>
+    ggplot(aes(year, value, fill = {{ .name }})) +
     geom_col() +
-    scale_y_mil()
-    labs(title = "how refugees change over time?",
-         subtitle = "per year")
+    scale_x_yrs() +
+    scale_y_mil() +
+    labs(
+      title = .title,
+      subtitle = .subtitle
+    ) +
+    scale_fill_discrete_qualitative() +
+    facet_grid(cols = vars({{ facet_var }}))
+}
+
+plot_continents(
+  refugees_long_origin, "How the refugee level change between the continents?",
+  "Origin country of refugees"
+)
 ```
-
-
-
-### to what countries
 
 ```{r}
+plot_continents(
+  refugees_long_destination, "How the refugee level change between the continents?",
+  "Destination country of refugees", destination_continent
+)
+```
 
-countries <- read_csv("https://gist.githubusercontent.com/fogonwater/bc2b98baeb2aa16b5e6fbc1cf3d7d545/raw/6fd2951260d8f171181a45d2f09ee8b2c7767330/countries.csv") 
+## refugees between the continets
 
-countries_less <-countries |>  select(country_code3, continent_name)
+there seems to be intra continent refugees, next ill check how between the continets and domestic differ
 
-df2 <- df |> 
-    
-  df2 |>   
-    glimpse()
+```{r}
+df2 <- df |>
+  mutate(between_continents = if_else(origin_continent != destination_continent, TRUE, FALSE), .before = 1)
+```
+
+```{r}
+df2 |>
+  filter(between_continents == TRUE) |>
+  group_to_long(destination_continent) |>
+  plot_continents("what is the destination of Between continents refugees", "", destination_continent)
+```
+```{r}
+df2 |>
+  filter(between_continents == TRUE) |>
+  group_to_long(origin_continent) |>
+  plot_continents(
+    "where the Between continents refugees originate from?", "",
+    origin_continent
+  )
 ```
 
 
-# other focus ideas
+# deep dive south america, between continets
 
-* what countries too the most (ratio of gdp)
-* from where (coo_name) to destination (coa_name)
-* has it changed? why it has changed?
+south america has interesting change, and I'm not familiar with the continent. I'll try to check if data gives interesting elements
 
-* too many countries, what to focus
-  + changes in some region? - why a change has happended?
-* short deep dive to asylum seekers?
+```{r}
+southAmerica <- df2 |>
+  filter(origin_continent == "South America", between_continents == TRUE)
+```
+
+```{r}
+southAmericaSummarized <- southAmerica |>
+  select(-year) |>
+  group_by(origin_country) |>
+  summarise(across(where(is.double), list(sum = sum)))
+
+
+southAmericaSummarized |>
+  gt::gt()
+```
+
+select refugees and asylum seekers since the other refugree classes are mostly zeros
+
+```{r}
+southAmerica |>
+  group_to_long(origin_country) |>
+  filter(name %in% c("refugees", "asylum_seekers")) |>
+  plot_continents("how south america refugees have changed?", "", facet_var = name, .name = origin_country)
+```
