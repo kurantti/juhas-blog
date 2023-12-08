@@ -11,254 +11,196 @@ draft: true
 format: html
 ---
 
-# prep
-## libs
-
 ```{r}
-library(janitor)
-library(skimr)
-library(correlationfunnel)
-library(DataExplorer)
-library(gghighlight)
-library(patchwork)
 library(tidyverse)
 ```
 
-
-## get the data
+# get the data
 
 ```{r}
 tuesdata <- tidytuesdayR::tt_load("2021-01-05")
 
-transit_cost <- tuesdata |> pluck(1)
+raw <- tuesdata |>
+  pluck(1) |>
+  type_convert()
+```
+
+# focus
+
+- what explains the transit costs?
+  - select variables/features
+    - end_year - start_year
+    - length
+    - stations
+    - tunnel
+    - cost = real_cost / length
+  - add continent factor since its mentioned in the Tuesday docs
+
+```{r}
+raw |> skim()
 ```
 
 
+check quality of real_cost, start and end year column since its read as character
+
+```{r}
+raw |>
+  filter(if_any(c(real_cost, start_year, end_year), \(x) str_detect(x, "[[:alpha:]]", negate = TRUE)))
+```
 
 # eda
 
-## what explains the price
-
 ```{r}
-transit_cost <- transit_cost %>%
-  filter((!is.na(e) | rr != 1), real_cost > 0, country != "FI") %>%
-  type_convert(na = c("years", "5 NA"))
-```
+transit_cost <- raw %>%
+  filter(!if_any(c(start_year, end_year, real_cost), \(x) str_detect(x, "[[:alpha:]]")), real_cost != "0") |>
+  type_convert() |>
+  transmute(
+    build_cost = real_cost / length,
+    building_time_years = end_year - start_year,
+    rail_lenght = length,
+    how_many_stations = stations,
+    tunnel_ratio = tunnel / rail_lenght,
+    country = str_replace(country, "UK", "GB"),
+    continent = countrycode::countrycode(country, "iso2c", "continent")
+  )
 
-
-```{r}
-transit_cost %>%
-  count(real_cost, sort = T)
-
-transit_cost %>%
-  skim()
-```
-
-```{r}
-transit_cost %>%
-  ggplot(aes(tunnel, cost_km_millions)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = "lm") +
-  labs(title = "Tunnel Prices", x = "tunnel lenght", y = "costs per kilometer")
+transit_cost
 ```
 
 ```{r}
-library(countrycode)
-
-transit_cost <- transit_cost %>%
-  mutate(continent = countrycode(country, "iso2c", "continent"))
-
-
-transit_cost %>%
-  ggplot(aes(cost_km_millions, length)) +
-  geom_point() +
-  facet_wrap(vars(continent))
+transit_cost |> skim()
 ```
-clear cluster, but americans, asia and europe has outliers:
+
+## linearity & outliers
+
+america seems to have outliers in the data
 
 
 ```{r}
-library(gghighlight)
+library(colorspace)
+hcl_palettes(type = "sequential")
 
 
-transit_cost %>%
-  ggplot(aes(cost_km_millions, length)) +
-  geom_point() +
-  gghighlight(cost_km_millions > 1000, label_key = line) +
-  facet_wrap(vars(continent))
+plot_things <- function(.data, y_vals = length) {
+  .data |>
+    ggplot(aes(build_cost, {{ y_vals }}, color = continent)) +
+    geom_jitter(alpha = 1 / 2) +
+    geom_smooth(method = "lm", se = F) +
+    labs(
+      title = "Transit cost linearity per continent",
+      subtitle = "build_cost, $building_time_years, $rail_lenght, $how_many_stations,$tunnel_ratio"
+    ) +
+    theme(legend.position = "bottom") +
+    scale_color_discrete_sequential(palette = "Heat")
+}
+
+
+
+transit_cost |>
+  select(!c("country", "continent")) |>
+  map(\(x) plot_things(transit_cost, y_vals = x))
 ```
-
 
 ```{r}
-transit_cost %>%
-  ggplot(aes(cost_km_millions, length)) +
-  geom_point() +
-  # gghighlight(length > 5000 , label_key = line ) +
-
-
-  facet_wrap(vars(continent))
+transit_cost |>
+  ggplot(aes(building_time_years, fill = continent)) +
+  geom_bar() +
+  labs(title = "Number of Trailway project and building time in different continents ")
 ```
 
 
-less data:
+
+## correlation
+
+### complete dataset
+
+tunnel ratio and building time have statistically significant correlation to build cost
 
 ```{r}
-transit_cost %>%
-  # filter(str_length(start_year) > 4) %>%
-  count(start_year, sort = T)
-
-less <- transit_cost %>%
-  select(line, length, tunnel, stations, real_cost, continent) %>%
-  filter(!is.na(continent))
+transit_cost |>
+  correlation() |>
+  summary()
 ```
 
-## missing values
+
+### per continent
+
+correlations diverge from full dataset results, when split to continents, outliers cause problems?
 
 ```{r}
-less %>% plot_missing()
+library(correlation)
+
+transit_cost |>
+  group_by(continent) |>
+  correlation() |>
+  summary()
 ```
-## tunnels
+## continents imbalaced?
+
+heavy focus on Asia and europe, imbalaced data, but the trend for these continents wasnt different
 
 ```{r}
-less %>%
-  filter(is.na(tunnel))
-
-less %>%
-  filter(!is.na(tunnel)) %>%
-  group_by() %>%
-  summarise(min(tunnel), max(tunnel), mean(tunnel), median(tunnel))
-
-less %>%
-  ggplot(aes(tunnel)) +
-  geom_histogram()
+transit_cost |>
+  count(continent) |>
+  mutate(ratio = scales::percent(n / sum(n)))
 ```
-
-## feature analysis
-
-### categorical variables:
-
 ```{r}
-less %>% plot_bar(nrow = 4)
+transit_cost |>
+  group_by(continent) |>
+  summarise(across(where(is.double), list(mean = mean, median = median)))
 ```
 
-### correlatations
 
-```{r}
-bina <- less %>%
-  drop_na() %>%
-  binarize(n_bins = 5)
-
-bina %>%
-  glimpse()
-
-
-
-bina %>%
-  correlate(`real_cost__6274.292_Inf`) %>%
-  plot_correlation_funnel()
-```
-### numerical values
-
-```{r}
-less %>% plot_histogram()
-```
-
-data have high skew.
-
-
-```{r}
-less %>%
-  ggplot(aes(length, real_cost)) +
-  geom_violin() +
-  geom_jitter(alpha = 0.5) +
-  scale_y_log10()
-```
 
 # modeling
 
+## split data
+
 ```{r}
 library(tidymodels)
-library(xgboost)
+tidymodels_prefer()
 ```
 
+split data to training and testing, i dont use validation set since the data size is small
+testing set purpose is to confirm that the build model has potential to work with new data 
 
 ```{r}
 set.seed(123)
-initial_split <- initial_split(less, prop = 0.80)
 
+initial_split <- initial_split(transit_cost)
+initial_split
 trn <- training(initial_split)
-
 tst <- testing(initial_split)
 ```
 
-model recipe:
+## recipe
 
-TODO: why these things are selected to the model
+building tune and tunnel ratio seemed to have correlation with building cost. 
+some of the tunnel ratios were missing, i use mean imputation to insert replacement data
 
 ```{r}
-preprocessing_recipe <- recipe(real_cost ~ length + stations + tunnel + continent, data = trn) %>%
-  # Encode Categorical Data Types
-  # step_dummy(all_nominal()) %>%
-
-  # Combine low-frequency categories
-  # step_other(all_nominal(), threshold = 0.02, other = "other") %>%
-
-  # Impute missing
-  step_impute_knn(all_predictors(), neighbors = 3) |>
+transit_rec <- recipe(build_cost ~ building_time_years + tunnel_ratio, data = trn) %>%
+  step_impute_mean(tunnel_ratio) |>
   prep()
-
-# Remove unnecessary columns
-# step_rm(creation_date, line) %>
 ```
 
-```{r}
-transit_baked <- preprocessing_recipe %>%
-  bake(new_data = NULL)
-```
-
-# validate
-
-TODO: why this is done?
-
-categorical features:
-
-```{r}
-transit_baked %>% plot_bar(maxcat = 5)
-```
-
-
-numerical:
-
-```{r}
-transit_baked %>%
-  plot_histogram()
-```
-
-# cross validation
-
-TODO: why cross validation is needed?
-
-```{r}
-set.seed(123)
-
-car_cv_folds <- trn %>%
-  vfold_cv(v = 5)
-
-car_cv_folds
-```
-
-# models 
-
-## regression
+I am using standard 10 fold cross validation to test the models later, 
 
 
 ```{r}
-glmnet_model <- linear_reg(
-  mode = "regression"
-) %>%
-  set_engine("lm")
+transit_folds <- vfold_cv(trn, v = 10)
+transit_folds
+```
 
-glmnet_model
+low bias (blackbox) models can learn the relationship so well that it memorizes the training set, which means that when model is used with test data, the performance can degrade. 
+
+```{r}
+models <- list(lin = linear_reg(), rand = rand_forest(mode = "regression"), xg = boost_tree(mode = "regression"))
+modelset <- workflow_set(list(transit_rec), models)
+keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+res <- modelset |> workflow_map("fit_resamples", seed = 10101, verbose = T, resamples = transit_folds, control = keep_pred)
+
+res |> collect_metrics()
 ```
 
 ## xgbooost
@@ -307,7 +249,7 @@ xgboost_grid
 ```{r}
 glmnet_stage_1_cv_results_tbl <- tune_grid(
   object = glmnet_model,
-  preprocessor = preprocessing_recipe,
+  preprocessor = transit_rec,
   resamples = car_cv_folds,
   grid = glmnet_grid,
   metrics = metric_set(mae, mape, rmse, rsq),
@@ -320,7 +262,7 @@ glmnet_stage_1_cv_results_tbl <- tune_grid(
 ```{r}
 xgboost_stage_1_cv_results_tbl <- tune_grid(
   object = xgboost_model,
-  preprocessor = preprocessing_recipe,
+  preprocessor = transit_rec,
   resamples = car_cv_folds,
   grid = xgboost_grid,
   metrics = metric_set(mae, mape, rmse, rsq),
@@ -329,3 +271,10 @@ xgboost_stage_1_cv_results_tbl <- tune_grid(
 ```
 
 TODO: select best model / conclusions
+
+
+# vetiver control
+
+```{r}
+library(vetiver)
+```
