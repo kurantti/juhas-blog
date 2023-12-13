@@ -3,19 +3,24 @@ title: "Transit Cost Analysis"
 subtitle: "Tidy Tuesday, 2021-01-05"
 author: "Juha Päällysaho"
 date: "2021-04-01"
-date-modified: "2023-11-23"
+date-modified: "2023-12-13"
 execute:
   echo: true
   warning: false
-draft: true
+draft: false
 format: html
 ---
 
+load libraries
+
 ```{r}
 library(tidyverse)
+library(colorspace)
 ```
 
 # get the data
+
+load the data from tidytuesdayR package
 
 ```{r}
 tuesdata <- tidytuesdayR::tt_load("2021-01-05")
@@ -27,17 +32,16 @@ raw <- tuesdata |>
 
 # focus
 
-- what explains the transit costs?
-  - select variables/features
-    - end_year - start_year
+- what explains the transit costs in different continents?
+    - how many year the line took to build (end_year - start_year)
     - length
     - stations
-    - tunnel
+    - tunnel or ratio of tunnels from total length
     - cost = real_cost / length
   - add continent factor since its mentioned in the Tuesday docs
 
 ```{r}
-raw |> skim()
+raw |> skimr::skim()
 ```
 
 
@@ -49,6 +53,9 @@ raw |>
 ```
 
 # eda
+
+remove rows with missing or malformed values and convert to numeric. 
+prepare features for analysis and modeling
 
 ```{r}
 transit_cost <- raw %>%
@@ -67,56 +74,93 @@ transit_cost <- raw %>%
 transit_cost
 ```
 
+re-evaluate the data quality after transformation
+
 ```{r}
-transit_cost |> skim()
+transit_cost |> skimr::skim()
 ```
 
-## linearity & outliers
 
-america seems to have outliers in the data
+
+## how continents look like ?
+
+africa, oceania and south america have very few datapoints, which can cause problems with modeling
 
 
 ```{r}
-library(colorspace)
-hcl_palettes(type = "sequential")
-
-
-plot_things <- function(.data, y_vals = length) {
-  .data |>
-    ggplot(aes(build_cost, {{ y_vals }}, color = continent)) +
-    geom_jitter(alpha = 1 / 2) +
-    geom_smooth(method = "lm", se = F) +
-    labs(
-      title = "Transit cost linearity per continent",
-      subtitle = "build_cost, $building_time_years, $rail_lenght, $how_many_stations,$tunnel_ratio"
-    ) +
-    theme(legend.position = "bottom") +
-    scale_color_discrete_sequential(palette = "Heat")
-}
-
-
-
 transit_cost |>
-  select(!c("country", "continent")) |>
-  map(\(x) plot_things(transit_cost, y_vals = x))
+  count(continent) |>
+  mutate(ratio = scales::percent(n / sum(n)))
 ```
+however the data from africa, oceania and south america is not very different from other continents, so i will keep them in the analysis
+
+
+```{r}
+transit_cost |>
+    mutate(building_cost_log = log10(build_cost), .before = 1) |>
+  group_by(continent) |>
+  summarise(across(where(is.double), list(mean = mean, median = median)))
+```
+
+
+building time per continent, the data is skewed to the right, which means that most of the lines were built in less than 10 years
+
 
 ```{r}
 transit_cost |>
   ggplot(aes(building_time_years, fill = continent)) +
-  geom_bar() +
-  labs(title = "Number of Trailway project and building time in different continents ")
+  geom_histogram(binwidth = 0.8) +
+  labs(
+    title = "building time per continent",
+    subtitle = "binwidth = 0.8"
+  )
 ```
 
+this represent the building time better, asia seems to build the lines faster than other continents. however if track lenght is taken into account, the picture changes.
+
+```{r}
+b_size <- 1.7
+transit_cost |>
+  ggplot(aes(building_time_years)) +
+  geom_freqpoly(aes(color = continent), binwidth = b_size) +
+  labs(
+    title = "building time per continent",
+    subtitle = str_glue("binwidth = {b_size}")
+  )
+
+transit_cost |>
+  ggplot(aes(building_time_years)) +
+  geom_histogram(aes(fill = continent), position = "fill", binwidth = b_size) +
+  labs(
+    title = "portion of building time per continent",
+    subtitle = str_glue("binwidth = {b_size}")
+  )
+```
+
+## building time vs track lenght
 
 
+```{r}
+# scatter plot with building time and track lenght
+transit_cost |>
+  ggplot(aes(building_time_years, rail_lenght, color = continent)) +
+  geom_jitter(alpha = 1 / 2) +
+  geom_smooth(method = "lm", se = F) +
+  labs(title = "building time vs track lenght",
+       subtitle = "y scale is per continent") +
+  theme(legend.position = "bottom") +
+  scale_color_discrete_sequential(palette = "Heat") +
+  facet_wrap(vars(continent), scales = "free_y")
+````
 ## correlation
 
 ### complete dataset
 
-tunnel ratio and building time have statistically significant correlation to build cost
+tunnel ratio and building time have statistically significant correlation to build cost.
+correlation against build cost is not very strong, but it is statistically significant.  
 
 ```{r}
+library(correlation)
 transit_cost |>
   correlation() |>
   summary()
@@ -125,36 +169,16 @@ transit_cost |>
 
 ### per continent
 
-correlations diverge from full dataset results, when split to continents, outliers cause problems?
+correlation in continents is not strong.
 
 ```{r}
-library(correlation)
-
 transit_cost |>
   group_by(continent) |>
   correlation() |>
   summary()
 ```
-## continents imbalaced?
-
-heavy focus on Asia and europe, imbalaced data, but the trend for these continents wasnt different
-
-```{r}
-transit_cost |>
-  count(continent) |>
-  mutate(ratio = scales::percent(n / sum(n)))
-```
-```{r}
-transit_cost |>
-  group_by(continent) |>
-  summarise(across(where(is.double), list(mean = mean, median = median)))
-```
-
-
 
 # modeling
-
-## split data
 
 ```{r}
 library(tidymodels)
@@ -162,21 +186,25 @@ tidymodels_prefer()
 ```
 
 split data to training and testing, i dont use validation set since the data size is small
-testing set purpose is to confirm that the build model has potential to work with new data 
+testing set purpose is to confirm that the build model has potential to work with new data.
+i use log10 of build cost to make the data more normal distributed.
 
 ```{r}
 set.seed(123)
 
-initial_split <- initial_split(transit_cost)
-initial_split
-trn <- training(initial_split)
-tst <- testing(initial_split)
+transit_cost_log <- transit_cost |>
+  mutate(build_cost = log10(build_cost))
+
+split <- initial_split(transit_cost_log, prop = 0.8)
+trn <- training(split)
+tst <- testing(split)
 ```
 
 ## recipe
 
 building tune and tunnel ratio seemed to have correlation with building cost. 
-some of the tunnel ratios were missing, i use mean imputation to insert replacement data
+some of the tunnel ratios were missing, i use mean imputation to insert replacement data.
+i also add recipe with all features to see if it improves the model.
 
 ```{r}
 transit_rec <- recipe(build_cost ~ building_time_years + tunnel_ratio, data = trn) %>%
@@ -184,97 +212,167 @@ transit_rec <- recipe(build_cost ~ building_time_years + tunnel_ratio, data = tr
   prep()
 ```
 
-I am using standard 10 fold cross validation to test the models later, 
+## cross validation
 
+I am using standard 10 fold cross validation to test the models later.
+cross validation is used to estimate how well the model will perform in practice without using the test set.
 
 ```{r}
 transit_folds <- vfold_cv(trn, v = 10)
 transit_folds
 ```
 
+
+## select models
+
 low bias (blackbox) models can learn the relationship so well that it memorizes the training set, which means that when model is used with test data, the performance can degrade. 
+linear regression is the most simple model, but it can be used as a baseline to compare other models.
+random forest and xgboost are blackbox models, which can learn complex relationships, but they are prone to overfitting. cross validation can help to reduce overfitting.
+
 
 ```{r}
 models <- list(lin = linear_reg(), rand = rand_forest(mode = "regression"), xg = boost_tree(mode = "regression"))
 modelset <- workflow_set(list(transit_rec), models)
 keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
-res <- modelset |> workflow_map("fit_resamples", seed = 10101, verbose = T, resamples = transit_folds, control = keep_pred)
+metrics_list <- metric_set(rmse, rsq, mae)
 
-res |> collect_metrics()
 ```
 
-## xgbooost
+### fit models
+
+workflowmap has all the models and recipes in a list and it fits all the models to the training set.
 
 ```{r}
-xgboost_model <- boost_tree(
-  mode       = "regression",
-  trees      = 1000,
-  min_n      = tune(),
+fit_models <- function(.data) {
+  .data |>
+    workflow_map("fit_resamples",
+      seed = 10101, verbose = T,
+      resamples = transit_folds, control = keep_pred,
+      metrics = metrics_list
+    )
+}
+
+res <- modelset |> fit_models()
+
+res
+```
+
+### evaluate models
+
+rmse is used to evaluate the models, since it is easy to interpret and it is in the same units as the target variable. based on ranking, linear regression is the best model based on rmse. however the difference between the models is not very big.
+
+```{r}
+res |> collect_metrics()
+res |> autoplot()
+res |> rank_results(rank_metric = "rmse")
+```
+
+
+## tune hyperparameters
+
+lets tune the hyperparameters of random forest and xgboost models to see if we can improve the performance. I will keep the linear regression model as a baseline.
+
+```{r}
+xg_tune <- boost_tree(
+  mode = "regression",
+  trees = 1000,
+  min_n = tune(),
   tree_depth = tune(),
   learn_rate = tune()
-) %>%
-  set_engine("xgboost", objective = "reg:squarederror")
-
-xgboost_model
-```
-
-```{r}
-glmnet_params <- parameters(penalty(), mixture())
-glmnet_params
-
-set.seed(123)
-glmnet_grid <- grid_max_entropy(glmnet_params, size = 20)
-glmnet_grid
-```
-
-
-
-```{r}
-glmnet_grid %>%
-  ggplot(aes(penalty, mixture)) +
-  geom_point(size = 3) +
-  scale_x_log10() +
-  labs(title = "Max Entropy Grid", x = "Penalty (log scale)", y = "Mixture")
-```
-
-```{r}
-xgboost_params <- parameters(min_n(), tree_depth(), learn_rate())
-xgboost_params
-
-set.seed(123)
-xgboost_grid <- grid_max_entropy(xgboost_params, size = 30)
-xgboost_grid
-```
-
-```{r}
-glmnet_stage_1_cv_results_tbl <- tune_grid(
-  object = glmnet_model,
-  preprocessor = transit_rec,
-  resamples = car_cv_folds,
-  grid = glmnet_grid,
-  metrics = metric_set(mae, mape, rmse, rsq),
-  control = control_grid(verbose = TRUE)
 )
-```
+xg_tune
 
-
-
-```{r}
-xgboost_stage_1_cv_results_tbl <- tune_grid(
-  object = xgboost_model,
-  preprocessor = transit_rec,
-  resamples = car_cv_folds,
-  grid = xgboost_grid,
-  metrics = metric_set(mae, mape, rmse, rsq),
-  control = control_grid(verbose = TRUE)
+rf_tune <- rand_forest(
+  mode = "regression",
+  mtry = tune(),
+  trees = 1000,
+  min_n = tune()
 )
+
+modelset2 <- workflow_set(list(pari = transit_rec), list(reg = linear_reg(),rf_tune = rf_tune, xg_tune = xg_tune), cross = TRUE)
+modelset2
 ```
-
-TODO: select best model / conclusions
-
-
-# vetiver control
 
 ```{r}
-library(vetiver)
+res2 <- modelset2 |> workflow_map(
+  resamples = transit_folds, grid = 10, verbose = TRUE, seed = 10102,
+  control = keep_pred,
+  metrics = metrics_list
+)
+
+res2 |> collect_metrics() |>
+    arrange(-mean)
 ```
+
+## analyse models
+
+generally there is little diffence between the models, this is due to dataset being simple (small amount of features and datapoints), whic means simple liner regression can learn the relationship well. Below its clear that  non tuned models are quite simeilar to tuned models.
+
+
+```{r}
+library(patchwork)
+ res |> autoplot() / res2 |> autoplot() + plot_annotation(title = "Non Tuned (top row) vs Tuned models (bottom row)")
+```
+
+
+## select model
+
+select best model based on rmse metric and fit to the whole training set
+
+```{r}
+bestmodel <- res2 |>
+  extract_workflow_set_result("pari_xg_tune") |>
+  select_best(metric = "rmse")
+bestmodel
+
+result <- res2 |>
+  extract_workflow("pari_xg_tune") |>
+  finalize_workflow(bestmodel) |>
+  last_fit(split = split)
+
+
+```
+
+the modeling is done, but out of curiosity lets if there is a difference between training metrics and test metrics.
+rmse is slightly higher in test set, but the difference is not big, which means that the model is not overfitting.
+
+
+```{r}
+result |>
+  collect_predictions() |>
+  metrics(truth = build_cost, estimate = .pred)
+
+
+rank_results(res2, rank_metric = "rmse", select_best = TRUE) 
+```
+
+## check predicions vs actual values
+
+Plot the predictions vs actual values. I convert the values back to original scale to make the plot more readable for human. Generally the predictions are close to actual values, but there are some outliers.
+
+```{r}
+result |>
+  collect_predictions() |>
+    mutate(build_cost = 10 ^ build_cost,
+           .pred = 10^.pred) |>
+  ggplot(aes(.pred, build_cost)) +
+  geom_point(alpha = 0.5) +
+  geom_abline() +
+  coord_obs_pred() +
+  labs(title = "Predicted vs actual value") +
+  labs(x = "Predicted", y = "Actual")
+```
+```{r}
+transit_cost |> 
+    summarise(build_cost = mean(build_cost), #add other statistical metrics
+              sd = sd(build_cost),
+              median = median(build_cost),
+              min = min(build_cost),
+              max = max(build_cost),
+              n = n())
+    
+```
+
+
+
+
