@@ -1,0 +1,136 @@
+---
+title: "hydrowaste"
+subtitle: "Tidy Tuesday, 2021-01-05"
+author: "Juha Päällysaho"
+date: "2023-04-18"
+date-modified: "2023-12-13"
+execute:
+  echo: true
+  warning: false
+draft: true
+---
+
+
+```{r}
+library(tidyverse)
+library(skimr)
+```
+
+this is tidytues data on wasterwater treatment plants
+
+
+```{r}
+tuesdata <- tidytuesdayR::tt_load(2022, week = 38)
+tuesdata
+df_raw <- tuesdata |> pluck(1) |> 
+    type_convert() |>
+    janitor::clean_names()
+```
+
+the data has country locations, longitude/latitude,countries, population served, waste water discharge levels, location from coastal areas and is the waste treatment plant at designed quantity level. THe plants have different statustes from closed to operational.
+
+possible business questions:
+- which countries have the highest waste water discharge levels? If we thing about financial support on water treatment plants, which countries should we focus on to get highest impact?
+- what countries has the worst water treatment plants per capita? again, this linked to impact value of possible monetary support
+- the presence of coastal areas information in the data is also interesting to approach the problem from the perspective of water quality and marine life.
+
+
+```{r}
+
+df_raw |> skim()
+
+```
+
+
+
+# etl
+
+```{r}
+df <- df_raw |> 
+    mutate(
+        #replace waste_dis and pop_server 0 with NA
+across(c(waste_dis, pop_served), ~na_if(., 0))
+        ) |>
+ mutate(waste_ratio = waste_dis/pop_served,
+        continent = countrycode::countrycode(cntry_iso, "iso3c", "continent"),
+        .before = 1)
+```
+
+# eda
+
+```{r}
+# histogram waste_ratio
+df |> 
+    ggplot(aes(waste_ratio))+
+    geom_histogram(binwidth = 0.1)
+
+```
+
+```{r}
+```
+
+
+avg_wastewater_disposal is the average waste discharge per plant in region
+avg_wastewater_disposal_to_population_served is importance of the disposal center
+
+
+```{r}
+# understand if status has interesting information
+continents_agg <- df |> 
+    #average waste_discharge
+    summarise(
+        plants = n(),
+        avg_pop_served = mean(pop_served, na.rm = T),
+        ,avg_wastewater_disposal = mean(waste_dis, na.rm = T),
+              avg_wastewater_disposal_to_population_served = mean(waste_ratio, na.rm = T),
+        .by = c(continent)) |> 
+    arrange(-plants) |> 
+    filter(!is.na(continent))
+
+continents_agg
+    
+```
+
+Africa has the highest average waste discharge per plant, but the average waste discharge per capita is highest in Europe. This is interesting, because it means that the waste water treatment plants in Europe are not as efficient as in other continents. This could be due to the fact that the plants are older and need more maintenance. 
+```{r}
+continents_agg |> 
+    # ggplot avg_pop_served and avg_wastewater_disposal
+    ggplot(aes(avg_pop_served, avg_wastewater_disposal, color = continent))+
+    geom_point() +
+    labs(title = "avg_pop_served and avg_wastewater_disposal")
+```
+
+# waste water plants in Finland
+
+```{r}
+df |> 
+    filter(country == "Finland") |>
+    summarize(avg_waste_ratio = mean(waste_ratio, na.rm = T))
+```
+
+https://evamaerey.github.io/flipbooks/geom_sf/geom_sf.html#50
+
+below is a map of waste water treatment plants in Finland. The color of the points is the waste ratio, which is the waste discharge per capita. The darker the color, the higher the waste discharge per capita. The map shows that the waste discharge per capita is higher in the south of Finland, which is the most populated area.
+
+```{r}
+
+library(sf)
+library(rnaturalearth)
+
+fi <- ne_countries(  
+  scale = "medium", returnclass = "sf") %>%  
+  select(name, continent, geometry) %>%  
+  filter(name == 'Finland')
+
+df |> 
+  filter(country == "Finland") |>
+  # View()
+  st_as_sf(coords = c("lon_wwtp", "lat_wwtp"), crs = 4326, remove = FALSE)  |> 
+  ggplot()+
+  geom_sf(data = fi) +
+  geom_point(aes(lon_wwtp,lat_wwtp, color = waste_ratio), alpha = .7, size = 2)  +
+  scale_color_viridis_c()
+```
+
+
+
