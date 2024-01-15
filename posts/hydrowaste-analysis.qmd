@@ -3,11 +3,11 @@ title: "hydrowaste"
 subtitle: "Tidy Tuesday, 2021-01-05"
 author: "Juha Päällysaho"
 date: "2023-04-18"
-date-modified: "2023-12-13"
+date-modified: "2024-01-15"
 execute:
   echo: true
   warning: false
-draft: true
+draft: false
 ---
 
 
@@ -16,7 +16,7 @@ library(tidyverse)
 library(skimr)
 ```
 
-this is tidytues data on wasterwater treatment plants
+this is tidytuesday data on wastewater treatment plants
 
 
 ```{r}
@@ -28,11 +28,10 @@ df_raw <- tuesdata |>
   janitor::clean_names()
 ```
 
-the data has country locations, longitude/latitude,countries, population served, waste water discharge levels, location from coastal areas and is the waste treatment plant at designed quantity level. THe plants have different statustes from closed to operational.
+the data has country locations, longitude/latitude,countries, population served, waste water discharge levels, location from coastal areas and is the waste treatment plant at designed quantity level. The plants have different statuses from closed to operational.
 
 possible business questions:
-- which countries have the highest waste water discharge levels? If we thing about financial support on water treatment plants, which countries should we focus on to get highest impact?  
-- what countries has the worst water treatment plants per capita? This linked to impact value of possible monetary support. 
+- which countries have the highest waste water discharge levels? If we thing about financial support on water treatment plants, which countries should we focus on to get highest impact? - what countries has the worst water treatment plants per capita? This linked to impact value of possible monetary support. 
 - the presence of coastal areas information in the data is also interesting to approach the problem from the perspective of water quality and marine life.  
 
 
@@ -62,9 +61,7 @@ df <- df_raw |>
 # eda
 
 ```{r}
-# understand if status has interesting information
 continents_agg <- df |>
-  # average waste_discharge
   summarise(
     plants = n(),
     avg_pop_served = mean(pop_served, na.rm = T), ,
@@ -84,35 +81,32 @@ continents_agg
 
 # level and continent
 
-is there difference on plant lelvel and continent?
+is there difference on plant level and continent?
 
 ```{r}
-#count statistics on continent and level
 plant_levels <- df |>
   summarise(
-    n =   n(),
+    n = n(),
     avg_waste_ratio = mean(waste_ratio, na.rm = T),
     .by = c(continent, level)
     # ratio = n / total
   ) |>
   arrange(-n)
-
 ```
 
 most of the advanced plants are in Europe and Asia. Africa has the most plants in the basic level.
 
 ```{r}
-plant_levels |> 
-    ggplot(aes(continent, n, fill = level)) +
+plant_levels |>
+  ggplot(aes(continent, n, fill = level)) +
   geom_col()
 ```
 
 
 ```{r}
-plant_levels |> 
-    ggplot(aes(continent, avg_waste_ratio, fill = level)) +
+plant_levels |>
+  ggplot(aes(continent, avg_waste_ratio, fill = level)) +
   geom_col()
-    
 ```
 
 
@@ -124,12 +118,14 @@ df |>
   # ggplot avg_pop_served and avg_wastewater_disposal
   ggplot(aes(waste_ratio, continent, color = level)) +
   geom_jitter(alpha = 0.5) +
-    scale_x_log10() +
-  labs(title = "waste water discharge per capita",
-       subtitle = "waste water discharge per capita by continent and level",
-       caption = "data: tidytuesdayR::hydrowaste",
-       x = "waste water discharge per capita",
-       y = "continent")
+  scale_x_log10() +
+  labs(
+    title = "waste water discharge per capita",
+    subtitle = "waste water discharge per capita by continent and level",
+    caption = "data: tidytuesdayR::hydrowaste",
+    x = "waste water discharge per capita",
+    y = "continent"
+  )
 ```
 # plants close to coast
 
@@ -138,19 +134,15 @@ df |>
 df |>
   ggplot(aes(level, waste_ratio, color = as_factor(coast_10km))) +
   geom_jitter(alpha = 0.5) +
-    scale_y_log10() +
-  labs(title = "waste water discharge per capita",
-       subtitle = "waste water discharge per capita by distance to coast and level",
-       caption = "data: tidytuesdayR::hydrowaste",
-       x = "distance to coast",
-       y = "waste water discharge per capita")
-
+  scale_y_log10() +
+  labs(
+    title = "waste water discharge per capita",
+    subtitle = "waste water discharge per capita by distance to coast and level",
+    color = "Coast, 10km",
+    x = "distance to coast",
+    y = "waste water discharge per capita"
+  )
 ```
-
-
-
-
-
 
 # waste water plants in Finland
 
@@ -193,14 +185,34 @@ what describers the waste discharge per capita?
 library(tidymodels)
 tidymodels_prefer()
 ```
-# pca to understand the variance with tidymodels
+
+# pca to understand the variance
 
 ```{r}
 df_pca <- df |>
   recipe(waste_ratio ~ .) |>
-  recipes::step_pca(all_predictors()) |>
-  prep() |>
-  bake(new_data = NULL)
+  step_select(-c(wwtp_name, status, waste_id, source, org_id, df, ends_with("wwtp"), ends_with("out"))) |>
+  step_impute_mean(all_numeric_predictors()) |>
+  step_normalize(all_numeric_predictors()) |>
+  step_pca(all_numeric_predictors(), num_comp = 3) |>
+  prep()
 ```
 
+- first qual_ component seems to be data quality layer, which has minimal impact on the actual analysis. 
+- the second component is linked to the waste water service level. 
 
+
+```{r}
+df_pca |>
+  tidy(4) |>
+  filter(component %in% str_glue("PC{1:4}")) |>
+  mutate(component = fct_inorder(component)) |>
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(component), nrow = 1) +
+  labs(title = "what features contribute to waste ratio (per capita)", y = NULL)
+```
+
+# conclusion
+
+generally the data features describe more on the data source quality. I think, to conduct deeper analysis one would need to join different data set depending if the problem is linked to funding allocation or for fixing plants that are close to sea, and therefore risk of contamination.
