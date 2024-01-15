@@ -6,7 +6,7 @@ about:
   links:
     - icon: linkedin
       text: LinkedIn
-      href: https://linkedin.com/juhapaal
+      href: https://www.linkedin.com/in/juhapaal/
     - icon: github
       text: Github
       href: https://github.com/kurantti
